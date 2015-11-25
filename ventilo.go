@@ -16,6 +16,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -62,6 +63,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, broadcast):
 		p = strings.TrimPrefix(p, broadcast)
 		s.broadcast(p, r.FormValue("message"))
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		fmt.Fprintf(w, "OK")
 
 	case strings.HasPrefix(p, listen):
 		conn, err := upgrader.Upgrade(w, r, nil)
