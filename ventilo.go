@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -37,6 +38,7 @@ func main() {
 type Server struct {
 	mu sync.Mutex
 	m  map[string][]chan string
+	t  map[string]time.Time
 }
 
 func NewServer() *Server {
@@ -50,8 +52,11 @@ var upgrader = websocket.Upgrader{
 }
 
 const (
+	status    = "/"
 	broadcast = "/broadcast/"
 	listen    = "/listen/"
+	template_ = `{{ range $key, $value := .m }}{{ $key }}
+{{ end }}`
 )
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +64,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	default:
 		http.NotFound(w, r)
+
+	case p == status:
+		h := template.Must(template.New("template").Parse(template_))
+		h.Execute(w, s)
 
 	case strings.HasPrefix(p, broadcast):
 		p = strings.TrimPrefix(p, broadcast)
@@ -124,6 +133,7 @@ func (s *Server) hangup(p string, c <-chan string) {
 func (s *Server) broadcast(p, m string) {
 	s.mu.Lock()
 	ls := append([]chan string{}, s.m[p]...) // copy
+	s.t[p] = time.Now().UTC()
 	s.mu.Unlock()
 	for _, c := range ls {
 		c <- m
