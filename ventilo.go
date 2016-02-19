@@ -15,13 +15,13 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
-	"text/template"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -38,11 +38,13 @@ func main() {
 type Server struct {
 	mu sync.Mutex
 	m  map[string][]chan string
-	t  map[string]time.Time
+	t  map[string]int
 }
 
 func NewServer() *Server {
-	return &Server{m: make(map[string][]chan string)}
+	return &Server{
+		m: make(map[string][]chan string),
+		t: make(map[string]int)}
 }
 
 var upgrader = websocket.Upgrader{
@@ -52,12 +54,16 @@ var upgrader = websocket.Upgrader{
 }
 
 const (
-	status    = "/"
+	status    = "/status/"
 	broadcast = "/broadcast/"
 	listen    = "/listen/"
-	template_ = `{{ range $key, $value := .m }}{{ $key }}
-{{ end }}`
 )
+
+type Status struct {
+	Channel   string
+	Listeners int
+	Messages  int
+}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
@@ -66,8 +72,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 
 	case p == status:
-		h := template.Must(template.New("template").Parse(template_))
-		h.Execute(w, s)
+		var ls []Status
+		for p := range s.m {
+			ls = append(ls, Status{p, len(s.m[p]), s.t[p]})
+		}
+		js, _ := json.Marshal(ls)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
 
 	case strings.HasPrefix(p, broadcast):
 		p = strings.TrimPrefix(p, broadcast)
@@ -133,7 +144,7 @@ func (s *Server) hangup(p string, c <-chan string) {
 func (s *Server) broadcast(p, m string) {
 	s.mu.Lock()
 	ls := append([]chan string{}, s.m[p]...) // copy
-	s.t[p] = time.Now().UTC()
+	s.t[p] += 1
 	s.mu.Unlock()
 	for _, c := range ls {
 		c <- m
