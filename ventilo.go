@@ -84,7 +84,7 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		name := strings.TrimPrefix(path, broadcast)
 		server.broadcast(name, request.FormValue("message"))
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
-		fmt.Fprintf(writer, "OK")
+		fmt.Fprintf(writer, "OK\n")
 
 	case strings.HasPrefix(path, listen):
 		websocket_, err := upgrader.Upgrade(writer, request, nil)
