@@ -36,69 +36,68 @@ func main() {
 }
 
 type Server struct {
-	mu sync.Mutex
-	m  map[string][]chan string
-	t  map[string]int
+	mutex     sync.Mutex
+	listeners map[string][]chan string
+	messages  map[string]int
 }
 
 func NewServer() *Server {
 	return &Server{
-		m: make(map[string][]chan string),
-		t: make(map[string]int)}
+		listeners: make(map[string][]chan string),
+		messages:  make(map[string]int)}
 }
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin:     func(request *http.Request) bool { return true },
 }
 
 const (
-	status    = "/status/"
+	channels  = "/channels/"
 	broadcast = "/broadcast/"
 	listen    = "/listen/"
 )
 
-type Status struct {
-	Channel   string
+type Channel struct {
+	Name      string
 	Listeners int
 	Messages  int
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p := r.URL.Path
+func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	path := request.URL.Path
 	switch {
 	default:
-		http.NotFound(w, r)
+		http.NotFound(writer, request)
 
-	case p == status:
-		var ls []Status
-		for p := range s.m {
-			ls = append(ls, Status{p, len(s.m[p]), s.t[p]})
+	case path == channels:
+		var list []Channel
+		for name := range server.listeners {
+			list = append(list, Channel{name, len(server.listeners[name]), server.messages[name]})
 		}
-		js, _ := json.Marshal(ls)
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
+		json_, _ := json.Marshal(list)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Write(json_)
 
-	case strings.HasPrefix(p, broadcast):
-		p = strings.TrimPrefix(p, broadcast)
-		s.broadcast(p, r.FormValue("message"))
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		fmt.Fprintf(w, "OK")
+	case strings.HasPrefix(path, broadcast):
+		name := strings.TrimPrefix(path, broadcast)
+		server.broadcast(name, request.FormValue("message"))
+		writer.Header().Set("Access-Control-Allow-Origin", "*")
+		fmt.Fprintf(writer, "OK")
 
-	case strings.HasPrefix(p, listen):
-		conn, err := upgrader.Upgrade(w, r, nil)
+	case strings.HasPrefix(path, listen):
+		websocket_, err := upgrader.Upgrade(writer, request, nil)
 		if err != nil {
 			log.Print(err)
 			return
 		}
+		name := strings.TrimPrefix(request.URL.Path, listen)
+		channel := server.listen(name)
+		defer server.hangup(name, channel)
 
-		p = strings.TrimPrefix(r.URL.Path, listen)
-		c := s.listen(p)
-		defer s.hangup(p, c)
-
-		for m := range c {
-			err := conn.WriteMessage(websocket.TextMessage, []byte(m))
+		for message := range channel {
+			err := websocket_.WriteMessage(websocket.TextMessage, []byte(message))
 			if err != nil {
 				log.Print(err)
 				return
@@ -107,33 +106,33 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) listen(p string) <-chan string {
-	c := make(chan string)
-	s.mu.Lock()
-	s.m[p] = append(s.m[p], c)
-	s.mu.Unlock()
-	return c
+func (server *Server) listen(name string) <-chan string {
+	channel := make(chan string)
+	server.mutex.Lock()
+	server.listeners[name] = append(server.listeners[name], channel)
+	server.mutex.Unlock()
+	return channel
 }
 
-func (s *Server) hangup(p string, c <-chan string) {
+func (server *Server) hangup(name string, channel <-chan string) {
 	// Remove channel from listener map.
-	s.mu.Lock()
-	ls := s.m[p]
-	for i := range ls {
-		if ls[i] == c {
-			ls = append(ls[:i], ls[i+1:]...)
+	server.mutex.Lock()
+	list := server.listeners[name]
+	for i := range list {
+		if list[i] == channel {
+			list = append(list[:i], list[i+1:]...)
 			break
 		}
 	}
-	s.m[p] = ls
-	s.mu.Unlock()
+	server.listeners[name] = list
+	server.mutex.Unlock()
 
 	// Drain channel for a minute, to unblock any in-flight senders.
 	go func() {
 		timeout := time.After(1 * time.Minute)
 		for {
 			select {
-			case <-c:
+			case <-channel:
 			case <-timeout:
 				return
 			}
@@ -141,12 +140,12 @@ func (s *Server) hangup(p string, c <-chan string) {
 	}()
 }
 
-func (s *Server) broadcast(p, m string) {
-	s.mu.Lock()
-	ls := append([]chan string{}, s.m[p]...) // copy
-	s.t[p] += 1
-	s.mu.Unlock()
-	for _, c := range ls {
-		c <- m
+func (server *Server) broadcast(name, message string) {
+	server.mutex.Lock()
+	list := append([]chan string{}, server.listeners[name]...) // copy
+	server.messages[name] += 1
+	server.mutex.Unlock()
+	for _, channel := range list {
+		channel <- message
 	}
 }
