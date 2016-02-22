@@ -78,6 +78,7 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		}
 		json_, _ := json.Marshal(list)
 		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		writer.Write(json_)
 
 	case strings.HasPrefix(path, broadcast):
