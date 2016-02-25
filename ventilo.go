@@ -97,6 +97,8 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		channel := server.listen(name)
 		defer server.hangup(name, channel)
 
+		go readLoop(websocket_)
+
 		for message := range channel {
 			err := websocket_.WriteMessage(websocket.TextMessage, []byte(message))
 			if err != nil {
@@ -148,5 +150,14 @@ func (server *Server) broadcast(name, message string) {
 	server.mutex.Unlock()
 	for _, channel := range list {
 		channel <- message
+	}
+}
+
+func readLoop(websocket_ *websocket.Conn) {
+	for {
+		if _, _, err := websocket_.NextReader(); err != nil {
+			websocket_.Close()
+			break
+		}
 	}
 }
