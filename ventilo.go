@@ -1,16 +1,16 @@
 // <fanout> was taken not <ventilo>!
 
-// Turn key websocket broadcasting: POST a message on a channel it will be
-// broadcasted to all the websockets listening on that channel.
+// Turn key websocket broadcasting: POST a message on a topic it will be
+// broadcasted to all the websockets listening for messages on that topic.
 
-// Channels are identified by the URL path e.g. connecting a websocket to
-// /listen/to/a/channel registers the websocket on the channel to-a-channel.
+// Topics are identified by the URL path e.g. connecting a websocket to
+// /listen/to/a/topic registers the websocket on the topic to-a-topicl.
 
-// Symmetrically a POST on /broadcast/to/a/channel will send a message to all
-// listeners on to-a-channel.
+// Symmetrically a POST on /broadcast/to/a/topic will send a message to all
+// listeners on to-a-topic.
 
 // Python by @3kwa https://gist.github.com/3kwa/5235b8289a2ac74f399d
-// Go by @nf https://gist.github.com/nf/7c03729770315c05570f
+// intial Go by @nf https://gist.github.com/nf/7c03729770315c05570f
 
 package main
 
