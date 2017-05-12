@@ -95,15 +95,23 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		}
 		name := strings.TrimPrefix(request.URL.Path, listen)
 		channel := server.listen(name)
+		dead := make(chan bool)
 		defer server.hangup(name, channel)
 
-		go readLoop(websocket_)
+		go readLoop(websocket_, dead)
 
-		for message := range channel {
-			err := websocket_.WriteMessage(websocket.TextMessage, []byte(message))
-			if err != nil {
-				log.Print(err)
-				return
+		for {
+			select {
+			case message := <-channel:
+				err := websocket_.WriteMessage(websocket.TextMessage, []byte(message))
+				if err != nil {
+					log.Print(err)
+					return
+				}
+			case message := <-dead:
+				if message {
+					return
+				}
 			}
 		}
 	}
@@ -153,10 +161,11 @@ func (server *Server) broadcast(name, message string) {
 	}
 }
 
-func readLoop(websocket_ *websocket.Conn) {
+func readLoop(websocket_ *websocket.Conn, dead chan bool) {
 	for {
 		if _, _, err := websocket_.NextReader(); err != nil {
 			websocket_.Close()
+			dead <- true
 			break
 		}
 	}
