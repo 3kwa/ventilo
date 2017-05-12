@@ -31,17 +31,19 @@ var httpAddr = flag.String("http", ":8080", "HTTP listen address")
 
 func main() {
 	flag.Parse()
-	http.Handle("/", NewServer())
+	http.Handle("/", newServer())
 	log.Fatal(http.ListenAndServe(*httpAddr, nil))
 }
 
+// Server holds the list of listeners (go channels to communicate with websocket client)
+// and a counter of the number of messages sent on each channel
 type Server struct {
 	mutex     sync.Mutex
 	listeners map[string][]chan string
 	messages  map[string]int
 }
 
-func NewServer() *Server {
+func newServer() *Server {
 	return &Server{
 		listeners: make(map[string][]chan string),
 		messages:  make(map[string]int)}
@@ -59,7 +61,8 @@ const (
 	listen    = "/listen/"
 )
 
-type Channel struct {
+// Topic has a name and some counters
+type Topic struct {
 	Name      string
 	Listeners int
 	Messages  int
@@ -72,14 +75,14 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		http.NotFound(writer, request)
 
 	case path == channels:
-		var list []Channel
+		var list []Topic
 		for name := range server.listeners {
-			list = append(list, Channel{name, len(server.listeners[name]), server.messages[name]})
+			list = append(list, Topic{name, len(server.listeners[name]), server.messages[name]})
 		}
-		json_, _ := json.Marshal(list)
+		json, _ := json.Marshal(list)
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
-		writer.Write(json_)
+		writer.Write(json)
 
 	case strings.HasPrefix(path, broadcast):
 		name := strings.TrimPrefix(path, broadcast)
@@ -154,17 +157,17 @@ func (server *Server) hangup(name string, channel <-chan string) {
 func (server *Server) broadcast(name, message string) {
 	server.mutex.Lock()
 	list := append([]chan string{}, server.listeners[name]...) // copy
-	server.messages[name] += 1
+	server.messages[name]++
 	server.mutex.Unlock()
 	for _, channel := range list {
 		channel <- message
 	}
 }
 
-func readLoop(websocket_ *websocket.Conn, dead chan bool) {
+func readLoop(websocket *websocket.Conn, dead chan bool) {
 	for {
-		if _, _, err := websocket_.NextReader(); err != nil {
-			websocket_.Close()
+		if _, _, err := websocket.NextReader(); err != nil {
+			websocket.Close()
 			dead <- true
 			break
 		}
