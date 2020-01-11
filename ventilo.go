@@ -97,6 +97,7 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 			return
 		}
 		name := strings.TrimPrefix(request.URL.Path, listen)
+		log.Printf("LISTEN channel=%s", name)
 		channel := server.listen(name)
 		dead := make(chan bool)
 		defer server.hangup(name, channel)
@@ -106,13 +107,16 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		for {
 			select {
 			case message := <-channel:
+				log.Printf("\tPULL channel=%s size=%d", name, len(message))
 				err := websocket_.WriteMessage(websocket.TextMessage, []byte(message))
 				if err != nil {
 					log.Print(err)
 					return
 				}
+				log.Printf("\tSENT channel=%s size=%d", name, len(message))
 			case message := <-dead:
 				if message {
+					log.Printf("LISTEN DEAD channel=%s", name)
 					return
 				}
 			}
@@ -159,8 +163,14 @@ func (server *Server) broadcast(name, message string) {
 	list := append([]chan string{}, server.listeners[name]...) // copy
 	server.messages[name]++
 	server.mutex.Unlock()
+	log.Printf("BROADCAST channel=%s size=%d count=%d", name, len(message), len(list))
 	for _, channel := range list {
-		channel <- message
+		select {
+		case channel <- message:
+			log.Printf("\tPUSH channel= %s size=%d", name, len(channel))
+		default:
+			log.Print("\tERROR")
+		}
 	}
 }
 
