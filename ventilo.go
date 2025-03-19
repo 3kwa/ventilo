@@ -73,7 +73,6 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	switch {
 	default:
 		http.NotFound(writer, request)
-
 	case path == channels:
 		var list []Topic
 		for name := range server.listeners {
@@ -83,43 +82,99 @@ func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		writer.Write(json)
-
 	case strings.HasPrefix(path, broadcast):
 		name := strings.TrimPrefix(path, broadcast)
 		server.broadcast(name, request.FormValue("message"))
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		fmt.Fprintf(writer, "OK\n")
-
 	case strings.HasPrefix(path, listen):
-		websocket_, err := upgrader.Upgrade(writer, request, nil)
-		if err != nil {
-			log.Print(err)
-			return
-		}
 		name := strings.TrimPrefix(request.URL.Path, listen)
 		log.Printf("LISTEN channel=%s", name)
-		channel := server.listen(name)
-		dead := make(chan bool)
-		defer server.hangup(name, channel)
 
-		go readLoop(websocket_, dead)
+		// Check if the client wants SSE or WebSocket
+		if request.Header.Get("Accept") == "text/event-stream" {
+			server.handleSSE(writer, request, name)
+		} else {
+			server.handleWebSocket(writer, request, name)
+		}
+	}
+}
 
-		for {
-			select {
-			case message := <-channel:
-				log.Printf("\tPULL channel=%s size=%d", name, len(message))
-				err := websocket_.WriteMessage(websocket.TextMessage, []byte(message))
-				if err != nil {
-					log.Print(err)
-					return
-				}
-				log.Printf("\tSENT channel=%s size=%d", name, len(message))
-			case message := <-dead:
-				if message {
-					log.Printf("LISTEN DEAD channel=%s", name)
-					return
-				}
+func (server *Server) handleWebSocket(writer http.ResponseWriter, request *http.Request, name string) {
+	websocket_, err := upgrader.Upgrade(writer, request, nil)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	channel := server.listen(name)
+	dead := make(chan bool)
+	defer server.hangup(name, channel)
+
+	go readLoop(websocket_, dead)
+
+	for {
+		select {
+		case message := <-channel:
+			log.Printf("\tPULL channel=%s size=%d", name, len(message))
+			err := websocket_.WriteMessage(websocket.TextMessage, []byte(message))
+			if err != nil {
+				log.Print(err)
+				return
 			}
+			log.Printf("\tSENT channel=%s size=%d", name, len(message))
+		case message := <-dead:
+			if message {
+				log.Printf("LISTEN DEAD channel=%s", name)
+				return
+			}
+		}
+	}
+}
+
+func (server *Server) handleSSE(writer http.ResponseWriter, request *http.Request, name string) {
+	// Set headers for SSE
+	writer.Header().Set("Content-Type", "text/event-stream")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.Header().Set("Connection", "keep-alive")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Create a notification channel for client disconnect
+	disconnected := request.Context().Done()
+	flusher, ok := writer.(http.Flusher)
+	if !ok {
+		http.Error(writer, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	channel := server.listen(name)
+	defer server.hangup(name, channel)
+
+	// Send an initial comment to establish the SSE connection
+	fmt.Fprintf(writer, "event: connected\n")
+	flusher.Flush()
+
+	// Keep-alive ticker
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-disconnected:
+			log.Printf("SSE DISCONNECTED channel=%s", name)
+			return
+		case <-ticker.C:
+			// Send keep-alive comment
+			fmt.Fprintf(writer, "event: ping\n")
+			flusher.Flush()
+		case message := <-channel:
+			log.Printf("\tPULL SSE channel=%s size=%d", name, len(message))
+
+			// Format as SSE message
+			fmt.Fprintf(writer, "data: %s\n\n", message)
+			flusher.Flush()
+
+			log.Printf("\tSENT SSE channel=%s size=%d", name, len(message))
 		}
 	}
 }
@@ -144,7 +199,6 @@ func (server *Server) hangup(name string, channel <-chan string) {
 	}
 	server.listeners[name] = list
 	server.mutex.Unlock()
-
 	// Drain channel for a minute, to unblock any in-flight senders.
 	go func() {
 		timeout := time.After(1 * time.Minute)
@@ -167,7 +221,7 @@ func (server *Server) broadcast(name, message string) {
 	for _, channel := range list {
 		select {
 		case channel <- message:
-			log.Printf("\tPUSH channel= %s size=%d", name, len(channel))
+			log.Printf("\tPUSH channel=%s size=%d", name, len(message))
 		default:
 			log.Print("\tERROR")
 		}
