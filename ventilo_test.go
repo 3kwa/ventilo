@@ -3,8 +3,8 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-    "fmt"
-    "io"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
