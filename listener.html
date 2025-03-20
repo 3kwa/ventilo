@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ws and/or sse</title>
+</head>
+<body>
+    <script>
+        // ws
+        const ws = new WebSocket('ws://localhost:8080/listen/a/channel');
+        ws.onmessage = function(event) {
+            console.log('ws:', event.data);
+        };
+        // sse
+        const sse = new EventSource('http://localhost:8080/listen/a/channel');
+        sse.onmessage = function(event) {
+            console.log('sse:', event.data);
+        };
+    </script>
+</body>
+</html>
