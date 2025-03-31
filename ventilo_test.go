@@ -209,29 +209,25 @@ func NewMockSSEClient(t *testing.T, url string) (*MockSSEClient, error) {
 }
 
 func (c *MockSSEClient) ReadEvent() (string, error) {
-	var event string
-	for {
-		line, err := c.reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				return "", fmt.Errorf("connection closed")
-			}
-			return "", err
-		}
-
-		line = strings.TrimSpace(line)
-		if line == "" {
-			// Empty line signals the end of an event
-			break
-		}
-
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
-			event = data
-		}
-	}
-
-	return event, nil
+    var eventData []string
+    for {
+        line, err := c.reader.ReadString('\n')
+        if err != nil {
+            if err == io.EOF {
+                return "", fmt.Errorf("connection closed")
+            }
+            return "", err
+        }
+        line = strings.TrimSpace(line)
+        if line == "" {
+            break
+        }
+        if strings.HasPrefix(line, "data: ") {
+            data := strings.TrimPrefix(line, "data: ")
+            eventData = append(eventData, data)
+        }
+    }
+    return strings.Join(eventData, "\n"), nil
 }
 
 func (c *MockSSEClient) Close() {
@@ -262,7 +258,7 @@ func TestSSEEndpoint(t *testing.T) {
 
 	// Broadcast a message
 	form := url.Values{}
-	form.Add("message", "Hello, SSE!")
+	form.Add("message", "Hello, SSE!\nmulti-lines")
 	resp, err := http.PostForm(ts.URL+broadcast+"testChannel", form)
 	if err != nil {
 		t.Fatalf("Failed to broadcast message: %v", err)
@@ -274,8 +270,8 @@ func TestSSEEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read SSE event: %v", err)
 	}
-	if event != "Hello, SSE!" {
-		t.Errorf("Expected message 'Hello, SSE!', got '%s'", event)
+	if event != "Hello, SSE!\nmulti-lines" {
+		t.Errorf("Expected message 'Hello, SSE!\nmulti-lines', got '%s'", event)
 	}
 }
 

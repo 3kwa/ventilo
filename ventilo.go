@@ -172,7 +172,11 @@ func (server *Server) handleSSE(writer http.ResponseWriter, request *http.Reques
 			log.Printf("\tPULL SSE channel=%s size=%d", name, len(message))
 
 			// Format as SSE message
-			fmt.Fprintf(writer, "data: %s\n\n", message)
+			lines := strings.Split(message, "\n")
+			for _, line := range lines {
+				fmt.Fprintf(writer, "data: %s\n", line)
+			}
+			fmt.Fprintf(writer, "\n")
 			flusher.Flush()
 
 			log.Printf("\tSENT SSE channel=%s size=%d", name, len(message))
